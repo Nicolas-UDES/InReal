@@ -9,7 +9,7 @@ public class PlaceServiceMock extends PlaceService {
 
     private List<InterestPoint> pointList;
 
-    public PlaceServiceMock(Context context, int visible, int invisible) {
+    public PlaceServiceMock(int visible, int invisible) {
         pointList = new ArrayList<>();
         for (int i = 0; i < visible; ++i) {
             pointList.add(generateVisible());

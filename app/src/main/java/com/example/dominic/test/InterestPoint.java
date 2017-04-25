@@ -9,10 +9,15 @@ public class InterestPoint {
     private TextView textView;
 
     public InterestPoint(double latitude, double longitude, String name) {
+        set(latitude, longitude, name);
+    }
+
+    public InterestPoint set(double latitude, double longitude, String name) {
         this.location = new Location("InterestPoint");
         this.location.setLatitude(latitude);
         this.location.setLongitude(longitude);
         this.name = name;
+        return this;
     }
 
     public Location getLocation() {

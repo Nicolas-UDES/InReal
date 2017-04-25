@@ -5,17 +5,12 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.location.Location;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.SystemClock;
+import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
-import android.support.v4.content.ContextCompat;
 import android.util.SizeF;
 import android.view.Gravity;
 import android.view.TextureView;
@@ -33,6 +28,7 @@ public class Orchestrateur extends Activity implements Runnable {
     private static final int INTERNET_PERMISSION_REQUEST = NETWORK_PERMISSION_REQUEST + 1;
 
     private float WIDTH = 1920;
+    private float WIDTH_ON_TWO = WIDTH/2;
     private float HEIGHT = 1080;
     private Float PIXEL_PER_METER;
     private Float PIXEL_PER_DEGREE;
@@ -47,9 +43,8 @@ public class Orchestrateur extends Activity implements Runnable {
     private List<TextView> mTextViewList;
     private SensorEventBuffer mSensorEventBuffer;
 
+    private volatile boolean isRunning;
     private Thread loopThread;
-    private Runnable setTextView;
-    private Runnable clearTextView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -57,6 +52,8 @@ public class Orchestrateur extends Activity implements Runnable {
 
         //Hardcode pour une question de simplicite
         FIELD_OF_VIEW = new SizeF(67, 53);
+        PIXEL_PER_DEGREE = WIDTH/FIELD_OF_VIEW.getWidth();
+        PIXEL_PER_METER = HEIGHT/5000;
 
         //Set la vue
         setContentView(R.layout.activity_main);
@@ -65,31 +62,33 @@ public class Orchestrateur extends Activity implements Runnable {
         //On creer un pool de textView pour pas avoir a faire toujours des news
         mTextViewList = createTextViewPool(100);
 
+        getCameraPermission();
         if (!TESTING) {
-            getCameraPermission();
             return;
         }
 
         mGpsTracker = new GPSTrackerMock(this);
-        mPlaceService = new PlaceServiceMock(this, 0, 160);
+        mPlaceService = new PlaceServiceMock(0, 160);
         mPlaceService.getPlaces(mGpsTracker.getLatitude(), mGpsTracker.getLongitude());
         mSensorEventBuffer = new SensorEventBuffer((SensorManager) getSystemService(Context.SENSOR_SERVICE));
         startThread();
     }
 
     private void startThread() {
+        isRunning = true;
         loopThread = new Thread(this);
         loopThread.start();
     }
 
     private void getCameraPermission() {
         if(getPermission(Manifest.permission.CAMERA, CAMERA_PERMISSION_REQUEST)){
+            mCameraService = new CameraService(this, (TextureView) findViewById(R.id.cameraTexture));
             getFineLocationPermission();
         }
     }
 
     private void getFineLocationPermission() {
-        if(getPermission(Manifest.permission.ACCESS_FINE_LOCATION, FINE_LOCATION_PERMISSION_REQUEST)){
+        if(getPermission(Manifest.permission.ACCESS_FINE_LOCATION, FINE_LOCATION_PERMISSION_REQUEST) && !TESTING){
             getCoarseLocationPermission();
         }
     }
@@ -114,8 +113,8 @@ public class Orchestrateur extends Activity implements Runnable {
 
     private void allPermissionsReceived() {
         //Creer les services
-        mCameraService = new CameraService(this, (TextureView) findViewById(R.id.cameraTexture));
         mGpsTracker = new GPSTracker(this);
+        mGpsTracker.start();
         mPlaceService = new PlaceService(this);
         //On va chercher les places
         mPlaceService.getPlaces(mGpsTracker.getLatitude(), mGpsTracker.getLongitude());
@@ -133,7 +132,7 @@ public class Orchestrateur extends Activity implements Runnable {
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String permissions[], @NonNull int[] grantResults) {
         switch (requestCode) {
             case CAMERA_PERMISSION_REQUEST: {
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
@@ -178,48 +177,33 @@ public class Orchestrateur extends Activity implements Runnable {
                 else {
                     getInternetPermission();
                 }
-                return;
             }
         }
     }
 
     public void run() {
         long start;
-        while(true) {
+        // Il est impossible de quitter notre application... mouhahaha!
+        while(isRunning) {
             start = System.currentTimeMillis();
             processPoint();
             if(start - System.currentTimeMillis() > 16) {
                 System.out.println("We took " + (start - System.currentTimeMillis() - 16) + "ms too long.");
-                continue;
+            } else {
+                try {
+                    //60 frames/secondes environ égale à 16 millisecondes/frame
+                    Thread.sleep(16 - (start - System.currentTimeMillis()));
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
             }
-
-            try {
-                //60 frames/secondes environ égale à 16 millisecondes/frame
-                Thread.sleep(16 - (start - System.currentTimeMillis()));
-            }
-            catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-
         }
     }
 
-    public float getAzimuth() {
-        return (float)Math.toDegrees(mSensorEventBuffer.getOrientationX());
-    }
-
-    private float getPixelPerDegree() {
-        if(PIXEL_PER_DEGREE == null) {
-            PIXEL_PER_DEGREE = WIDTH/FIELD_OF_VIEW.getWidth();
-        }
-        return PIXEL_PER_DEGREE;
-    }
-
-    private float getPixelPerMeter() {
-        if(PIXEL_PER_METER == null) {
-            PIXEL_PER_METER = HEIGHT/5000;
-        }
-        return PIXEL_PER_METER;
+    // Garde un angle antre 0 et 360
+    private float simplifyAngle(float angle) {
+        angle = angle % 360;
+        return angle < 0 ? angle + 360 : angle;
     }
 
     /**
@@ -239,24 +223,20 @@ public class Orchestrateur extends Activity implements Runnable {
      */
     public void processPoint() {
         long start = SystemClock.elapsedRealtimeNanos();
-        final List<InterestPoint> interestPoints = mPlaceService.getPointList();
-        for (int i = 0; i < interestPoints.size(); ++i) {
+        for (InterestPoint interestPoint : mPlaceService.getPointList()) {
             final Location myLocation = mGpsTracker.getLocation();
             if (myLocation == null) {
                 continue;
             }
-            final InterestPoint interestPoint = interestPoints.get(i);
 
             //Angle entre le nord magnetique et le point d'interet
-            float bearing = myLocation.bearingTo(interestPoint.getLocation());
-            float azimuth = getAzimuth();
-            //Pour simplicite, on ajuste les angles entre 0 et 360, au lieu de -180 a 180
-            azimuth = azimuth < 0 ? 360 + azimuth : azimuth;
-            bearing = bearing < 0 ? 360 + bearing : bearing;
-            float diffAngle =  azimuth - bearing;
-            float angle = diffAngle < 0 ? diffAngle + 360 : diffAngle;
+            float bearing = simplifyAngle(myLocation.bearingTo(interestPoint.getLocation()));
+            float azimuth = simplifyAngle(mSensorEventBuffer.getAzimuth());
+            float diffAngle =  simplifyAngle(azimuth - bearing);
 
-            final float xPosition = WIDTH/2 - (angle - 90) * getPixelPerDegree();
+            final float xPosition = WIDTH_ON_TWO - (diffAngle - 90) * PIXEL_PER_DEGREE;
+            final InterestPoint finalInterestPoint = interestPoint;
+
 
             //Est visible. On prend un peu plus de l'ecran pour eviter les glitch d'affichage
             //et preparer les points qui sont tout prets a etre affiches
@@ -265,15 +245,16 @@ public class Orchestrateur extends Activity implements Runnable {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        setTextView(interestPoint, xPosition, distance);
+                        setTextView(finalInterestPoint, xPosition, distance);
                     }
                 });
             }
+            // N'est pas visible et a un textView, on le remet dans le pool
             else if (interestPoint.getTextView() != null) {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        cleatTextView(interestPoint);
+                        cleatTextView(finalInterestPoint);
                     }
                 });
             }
@@ -285,7 +266,7 @@ public class Orchestrateur extends Activity implements Runnable {
     }
 
     private void setTextView(InterestPoint interestPoint, float xPosition, float distance) {
-        TextView tv = null;
+        TextView tv;
         //On lui trouve un textView
         if (interestPoint.getTextView() == null) {
             if (mTextViewList.size() > 0) {
@@ -293,9 +274,10 @@ public class Orchestrateur extends Activity implements Runnable {
                 interestPoint.setTextView(tv);
 
                 tv.setX(xPosition);
-                tv.setY(distance * getPixelPerMeter());
+                tv.setY(distance * PIXEL_PER_METER);
                 tv.setText(interestPoint.getName());
                 tv.setVisibility(TextView.VISIBLE);
+                tv.bringToFront();
             }
         }
         //Il a deja un textView
@@ -307,7 +289,7 @@ public class Orchestrateur extends Activity implements Runnable {
         }
     }
 
-    //N'est pas visible et a un textView, on le remet dans le pool
+
     private void cleatTextView(InterestPoint interestPoint) {
         // Je ne sais pas pourquoi c'est parfois null...
         if(interestPoint.getTextView() == null) {
@@ -319,7 +301,7 @@ public class Orchestrateur extends Activity implements Runnable {
     }
 
     private List<TextView> createTextViewPool(int n) {
-        final List<TextView> textViewList = new ArrayList<>();
+        final List<TextView> textViewList = new ArrayList<>(n);
         final Orchestrateur o = this;
 
         Runnable runnable = new Runnable() {
@@ -340,6 +322,7 @@ public class Orchestrateur extends Activity implements Runnable {
         tv.setGravity(Gravity.CENTER);
         tv.setTextColor(Color.CYAN);
         tv.setVisibility(TextView.INVISIBLE);
+        mViewContainer.addView(tv);
         return tv;
     }
 }

@@ -9,7 +9,6 @@ import android.content.pm.PackageManager;
 import android.graphics.Matrix;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
-import android.hardware.SensorManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -30,8 +29,6 @@ import android.util.Size;
 import android.util.SizeF;
 import android.view.Surface;
 import android.view.TextureView;
-import android.view.ViewGroup;
-import android.widget.TextView;
 
 import java.util.Arrays;
 import java.util.concurrent.Semaphore;
@@ -46,6 +43,9 @@ public class CameraService extends Service {
 
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
+    private HandlerThread mInferenceThread;
+    private Handler mInferenceHandler;
+
     private CameraDevice mCameraDevice;
     private CameraCaptureSession mCameraCaptureSession;
     private String mCameraId;
@@ -95,6 +95,7 @@ public class CameraService extends Service {
 
         @Override
         public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
+            startBackgroundThread();
             openCamera(width, height);
         }
 
@@ -105,6 +106,8 @@ public class CameraService extends Service {
 
         @Override
         public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
+            closeCamera();
+            stopBackgroundThread();
             return true;
         }
 
@@ -112,10 +115,6 @@ public class CameraService extends Service {
         public void onSurfaceTextureUpdated(SurfaceTexture texture) { }
     };
 
-    /**
-     *
-     *
-     */
     private final CameraDevice.StateCallback mStateCallback = new CameraDevice.StateCallback() {
         @Override
         public void onOpened(@NonNull CameraDevice cameraDevice) {
@@ -137,7 +136,6 @@ public class CameraService extends Service {
             cameraDevice.close();
             mCameraDevice = null;
         }
-
     };
 
     private void configureTransform(int viewWidth, int viewHeight) {
@@ -212,6 +210,9 @@ public class CameraService extends Service {
         }
     }
 
+    /**
+     * Open the current {@link CameraDevice}.
+     */
     private void openCamera(int width, int height) {
         setUpCameraOutputs(width, height);
         configureTransform(width, height);
@@ -233,6 +234,60 @@ public class CameraService extends Service {
         } catch (InterruptedException e) {
             //NON NON NON
             throw new RuntimeException("Interrupted while trying to lock camera opening.", e);
+        }
+    }
+
+    /**
+     * Closes the current {@link CameraDevice}.
+     */
+    private void closeCamera() {
+        try {
+            mCameraOpenCloseLock.acquire();
+            if (null != mCameraCaptureSession) {
+                mCameraCaptureSession.close();
+                mCameraCaptureSession = null;
+            }
+            if (null != mCameraDevice) {
+                mCameraDevice.close();
+                mCameraDevice = null;
+            }
+        } catch (final InterruptedException e) {
+            throw new RuntimeException("Interrupted while trying to lock camera closing.", e);
+        } finally {
+            mCameraOpenCloseLock.release();
+        }
+    }
+
+    /**
+     * Starts a background thread and its {@link Handler}.
+     */
+    private void startBackgroundThread() {
+        mBackgroundThread = new HandlerThread("ImageListener");
+        mBackgroundThread.start();
+        mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
+
+        mInferenceThread = new HandlerThread("InferenceThread");
+        mInferenceThread.start();
+        mInferenceHandler = new Handler(mInferenceThread.getLooper());
+    }
+
+    /**
+     * Stops the background thread and its {@link Handler}.
+     */
+    private void stopBackgroundThread() {
+        mBackgroundThread.quitSafely();
+        mInferenceThread.quitSafely();
+        try {
+            mBackgroundThread.join();
+            mBackgroundThread = null;
+            mInferenceHandler = null;
+
+            mInferenceThread.join();
+            mInferenceThread = null;
+            mInferenceHandler = null;
+        } catch (final InterruptedException e) {
+            // NON NON NON
+            e.printStackTrace();
         }
     }
 
@@ -266,29 +321,6 @@ public class CameraService extends Service {
             e.printStackTrace();
         } catch (NullPointerException e) {
             // NON NON NON
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Starts a background thread and its {@link Handler}.
-     */
-    private void startBackgroundThread() {
-        mBackgroundThread = new HandlerThread("CameraBackground");
-        mBackgroundThread.start();
-        mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
-    }
-
-    /**
-     * Stops the background thread and its {@link Handler}.
-     */
-    private void stopBackgroundThread() {
-        mBackgroundThread.quitSafely();
-        try {
-            mBackgroundThread.join();
-            mBackgroundThread = null;
-            mBackgroundHandler = null;
-        } catch (InterruptedException e) {
             e.printStackTrace();
         }
     }

@@ -6,14 +6,12 @@ import android.content.Intent;
 import android.location.Location;
 import android.os.IBinder;
 import android.support.annotation.Nullable;
-import android.util.Log;
 
 import com.android.volley.Request;
 import com.android.volley.RequestQueue;
 import com.android.volley.Response;
 import com.android.volley.VolleyError;
 import com.android.volley.toolbox.JsonObjectRequest;
-import com.android.volley.toolbox.StringRequest;
 import com.android.volley.toolbox.Volley;
 
 import org.json.JSONArray;
@@ -21,11 +19,16 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class PlaceService extends Service {
-    private String BASE_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?";
+    private int RADIUS = 5000;
+    private String KEY = "AIzaSyCIYOddQcDcoM5JZKELt4ayvAlIr5QknNs";
+    private String BASE_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=%1$f,%2$f&radius=%3$d&key=%4$s";
+    private int POOL_WIDTH = 100;
 
     private Context mContext;
+    private List<InterestPoint> pointListPool;
     private List<InterestPoint> pointList;
 
     public PlaceService() {}
@@ -33,43 +36,45 @@ public class PlaceService extends Service {
     public PlaceService(Context context) {
         mContext = context;
 
-        pointList = new ArrayList<>();
+        pointListPool = createInterestPointPool(POOL_WIDTH);
+        pointList = new ArrayList<>(POOL_WIDTH);
+    }
+
+    private String getRequest(double latitude, double longitude) {
+        return String.format(Locale.CANADA, BASE_URL, latitude, longitude, RADIUS, KEY);
     }
 
     public void getPlaces(double latitude, double longitude) {
-        StringBuilder builder = new StringBuilder();
-
-        builder.append(BASE_URL);
-        builder.append("location=");
-        builder.append(latitude);
-        builder.append(",");
-        builder.append(longitude);
-        builder.append("&radius=5000&key=AIzaSyCIYOddQcDcoM5JZKELt4ayvAlIr5QknNs");
-
-        System.out.println(builder.toString());
+        String request = getRequest(latitude, longitude);
+        System.out.println(request);
 
         RequestQueue queue = Volley.newRequestQueue(mContext);
-
-        JsonObjectRequest jsonObjRequest = new JsonObjectRequest(Request.Method.GET, builder.toString(), null, new Response.Listener<JSONObject>() {
+        JsonObjectRequest jsonObjRequest = new JsonObjectRequest(Request.Method.GET, request, null, new Response.Listener<JSONObject>() {
                     @Override
                     public void onResponse(JSONObject response) {
-                        try {
-                            JSONArray res = response.getJSONArray("results");
-                            for (int i = 0; i < res.length(); ++i) {
-                                JSONObject interestPoint = res.getJSONObject(i);
-                                JSONObject geometry = interestPoint.getJSONObject("geometry");
-                                JSONObject location = geometry.getJSONObject("location");
-                                double latitude = location.getDouble("lat");
-                                double longitude = location.getDouble("lng");
-                                String name = interestPoint.getString("name");
-
-                                //On pourrait utiliser un pool de InterestPoint
-                                pointList.add(new InterestPoint(latitude, longitude, name));
-
+                            JSONArray res = response.optJSONArray("results");
+                            if(res == null) {
+                                System.out.println("No results in Google's answer: " + response.toString());
+                                return;
                             }
-                        } catch (Exception e) {
-                            System.out.println(e);
-                        }
+                            for (int i = 0; i < Math.min(res.length(), POOL_WIDTH); ++i) {
+                                JSONObject interestPoint = res.optJSONObject(i);
+                                JSONObject geometry = interestPoint == null ? null : interestPoint.optJSONObject("geometry");
+                                JSONObject location = geometry == null ? null : geometry.optJSONObject("location");
+                                if(location == null) {
+                                    System.out.println("Incorrect Google answer: " + response.toString());
+                                    return;
+                                }
+
+                                double latitude = location.optDouble("lat", Double.NaN);
+                                double longitude = location.optDouble("lng", Double.NaN);
+                                String name = interestPoint.optString("name", null);
+
+                                if(!Double.isNaN(latitude) && !Double.isNaN(longitude) && name != null) {
+                                    pointList.add(pointListPool.remove(pointListPool.size() - 1).set(latitude, longitude, name));
+                                }
+                            }
+
                     }
                 }, new Response.ErrorListener() {
                     @Override
@@ -78,6 +83,17 @@ public class PlaceService extends Service {
                     }
                 });
         queue.add(jsonObjRequest);
+    }
+
+
+    private List<InterestPoint> createInterestPointPool(int n) {
+        final List<InterestPoint> interestPointList = new ArrayList<>(n);
+
+        for(int i = 0; i < n; ++i) {
+            interestPointList.add(new InterestPoint(0, 0, null));
+        }
+
+        return interestPointList;
     }
 
     public List<InterestPoint> getPointList() {

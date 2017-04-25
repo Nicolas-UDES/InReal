@@ -10,6 +10,7 @@ public class GPSTrackerMock extends GPSTracker {
     private Location location;
 
     public GPSTrackerMock(Context context) {
+        super(context);
         latitude = 45.3791246;
         longitude = -71.9286939;
 

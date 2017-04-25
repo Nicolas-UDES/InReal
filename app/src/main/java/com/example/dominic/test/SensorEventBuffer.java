@@ -49,10 +49,10 @@ public class SensorEventBuffer implements SensorEventListener {
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
-
+        // On pleure
     }
 
-    public float getOrientationX() {
-        return orientation[0];
+    public float getAzimuth() {
+        return orientation != null && orientation.length > 0 ? (float)Math.toDegrees(orientation[0]) : 0;
     }
 }
