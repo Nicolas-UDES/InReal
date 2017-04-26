@@ -7,10 +7,6 @@ import android.hardware.SensorManager;
 import android.os.Handler;
 import android.os.HandlerThread;
 
-/**
- * Created by Squirrel on 2017-04-24.
- */
-
 public class SensorEventBuffer implements SensorEventListener {
     private Handler mBackgroundHandler;
 

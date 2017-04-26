@@ -6,10 +6,6 @@ import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
 import android.support.annotation.NonNull;
 
-/**
- * Created by Squirrel on 2017-04-25.
- */
-
 public class CameraCapture extends CameraCaptureSession.CaptureCallback {
     private void process(CaptureResult result) {
     }

@@ -3,7 +3,6 @@ package com.example.dominic.test;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.location.Location;
 import android.os.IBinder;
 import android.support.annotation.Nullable;
 

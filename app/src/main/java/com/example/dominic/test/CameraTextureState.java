@@ -26,10 +26,6 @@ import java.util.Arrays;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Created by Squirrel on 2017-04-25.
- */
-
 public class CameraTextureState extends CameraDevice.StateCallback implements TextureView.SurfaceTextureListener {
     private Context mContext;
     private TextureView mTextureView;
