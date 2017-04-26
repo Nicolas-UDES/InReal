@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-public class PlaceService extends Service {
+public class PlaceService extends Service implements Response.Listener<JSONObject>, Response.ErrorListener {
     private int RADIUS = 5000;
     private String KEY = "AIzaSyCIYOddQcDcoM5JZKELt4ayvAlIr5QknNs";
     private String BASE_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=%1$f,%2$f&radius=%3$d&key=%4$s";
@@ -49,42 +49,40 @@ public class PlaceService extends Service {
         System.out.println(request);
 
         RequestQueue queue = Volley.newRequestQueue(mContext);
-        JsonObjectRequest jsonObjRequest = new JsonObjectRequest(Request.Method.GET, request, null, new Response.Listener<JSONObject>() {
-                    @Override
-                    public void onResponse(JSONObject response) {
-                            JSONArray res = response.optJSONArray("results");
-                            if(res == null) {
-                                System.out.println("No results in Google's answer: " + response.toString());
-                                return;
-                            }
-                            for (int i = 0; i < Math.min(res.length(), POOL_WIDTH); ++i) {
-                                JSONObject interestPoint = res.optJSONObject(i);
-                                JSONObject geometry = interestPoint == null ? null : interestPoint.optJSONObject("geometry");
-                                JSONObject location = geometry == null ? null : geometry.optJSONObject("location");
-                                if(location == null) {
-                                    System.out.println("Incorrect Google answer: " + response.toString());
-                                    return;
-                                }
-
-                                double latitude = location.optDouble("lat", Double.NaN);
-                                double longitude = location.optDouble("lng", Double.NaN);
-                                String name = interestPoint.optString("name", null);
-
-                                if(!Double.isNaN(latitude) && !Double.isNaN(longitude) && name != null) {
-                                    pointList.add(pointListPool.remove(pointListPool.size() - 1).set(latitude, longitude, name));
-                                }
-                            }
-
-                    }
-                }, new Response.ErrorListener() {
-                    @Override
-                    public void onErrorResponse(VolleyError error) {
-                        System.out.println("OUT ERREUR");
-                    }
-                });
+        JsonObjectRequest jsonObjRequest = new JsonObjectRequest(Request.Method.GET, request, null, this, this);
         queue.add(jsonObjRequest);
     }
 
+    @Override
+    public void onResponse(JSONObject response) {
+        JSONArray res = response.optJSONArray("results");
+        if(res == null) {
+            System.out.println("No results in Google's answer: " + response.toString());
+            return;
+        }
+        for (int i = 0; i < Math.min(res.length(), POOL_WIDTH); ++i) {
+            JSONObject interestPoint = res.optJSONObject(i);
+            JSONObject geometry = interestPoint == null ? null : interestPoint.optJSONObject("geometry");
+            JSONObject location = geometry == null ? null : geometry.optJSONObject("location");
+            if(location == null) {
+                System.out.println("Incorrect Google answer: " + response.toString());
+                return;
+            }
+
+            double latitude = location.optDouble("lat", Double.NaN);
+            double longitude = location.optDouble("lng", Double.NaN);
+            String name = interestPoint.optString("name", null);
+
+            if(!Double.isNaN(latitude) && !Double.isNaN(longitude) && name != null) {
+                pointList.add(pointListPool.remove(pointListPool.size() - 1).set(latitude, longitude, name));
+            }
+        }
+    }
+
+    @Override
+    public void onErrorResponse(VolleyError error) {
+        error.printStackTrace();
+    }
 
     private List<InterestPoint> createInterestPointPool(int n) {
         final List<InterestPoint> interestPointList = new ArrayList<>(n);
