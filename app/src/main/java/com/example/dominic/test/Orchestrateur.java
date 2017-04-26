@@ -300,19 +300,13 @@ public class Orchestrateur extends Activity implements Runnable {
         interestPoint.setTextView(null);
     }
 
-    private List<TextView> createTextViewPool(int n) {
+    private List<TextView> createTextViewPool(final int n) {
         final List<TextView> textViewList = new ArrayList<>(n);
         final Orchestrateur o = this;
 
-        Runnable runnable = new Runnable() {
-            public void run() {
-                textViewList.add(GetTextView(o));
-            }
-        };
-
         for(int i = 0; i < n; ++i) {
-            runOnUiThread(runnable);
-        }
+            textViewList.add(GetTextView(o));
+        };
 
         return textViewList;
     }
